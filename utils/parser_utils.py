@@ -1,8 +1,10 @@
-from argparse import ArgumentParser
+# fmt: off
 import argparse
-from copy import deepcopy
-import os
 import json
+import os
+from argparse import ArgumentParser
+from copy import deepcopy
+
 from data_loaders.dataset_utils import get_dataset_config
 
 
@@ -138,6 +140,7 @@ def add_ablation_options(parser: ArgumentParser):
 def add_evaluation_options(parser: ArgumentParser):
     group = parser.add_argument_group("evaluation")
     group.add_argument("--subjects", default="motionBert ElePose train_data model mas dreamfusion no_3d_noise", type=str, help="Subjects to evaluate, separated by spaces.")
+    group.add_argument("--saved_samples_path", default="", type=str, help="Path to saved samples directory.")
     group.add_argument("--vis_subjects", default="", type=str, help="Subjects to visualize, separated by spaces. For example: 'motionBert mas'.")
     group.add_argument("--num_visualize_samples", default=4, type=int, help="Number of samples to visualize for each subject.")
     group.add_argument("--metrics_names", default="fid diversity precision recall", type=str, help="Metrics to measure, separated by spaces.")

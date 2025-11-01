@@ -1,8 +1,12 @@
-import os, torch
-from scipy import linalg
+# fmt: off
+
+import os
+
 import numpy as np
+import torch
 import torch.nn as nn
 import torch.optim as optim
+from scipy import linalg
 from tqdm import tqdm
 
 

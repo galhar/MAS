@@ -1,26 +1,42 @@
-from copy import deepcopy
-from math import ceil
+# fmt: off
 import os
 import random
 import sys
+from copy import deepcopy
+from datetime import datetime
+from math import ceil
+
 import numpy as np
 import torch
-from datetime import datetime
 from tqdm import tqdm
+
+if 'eval' in sys.path[0]:
+    sys.path.insert(0, os.path.dirname(sys.path[0]))  # add mas folder to path
+
 from data_loaders.base_dataset import collate
-from data_loaders.dataset_utils import get_visualization_scale, sample_vertical_angle, get_dataset_loader
-from eval.metrics import calculate_frechet_distance, calculate_diversity, calculate_precision, calculate_recall
+from data_loaders.dataset_utils import (
+    get_dataset_loader,
+    get_visualization_scale,
+    sample_distance,
+    sample_vertical_angle,
+)
+from eval.eval_motionBert import convert_motionBert_skeleton
+from eval.metrics import (
+    calculate_diversity,
+    calculate_frechet_distance,
+    calculate_precision,
+    calculate_recall,
+)
 from sample.ablations import MAS_TYPES
 from sample.generate import Generator
 from sample.sampler import Sampler
 from utils.fixseed import fixseed
 from utils.math_utils import perspective_projection
 from utils.parser_utils import evaluate_args
-from eval.eval_motionBert import convert_motionBert_skeleton
-from data_loaders.dataset_utils import sample_distance
 
 ELEPOSE_SAMPLES_PATH = "dataset/nba/elepose_predictions"
-MOTIONBERT_SAMPLES_PATH = "dataset/nba/motionBert_predictions"
+# MOTIONBERT_SAMPLES_PATH = "dataset/nba/motionBert_predictions"
+MOTIONBERT_SAMPLES_PATH = "/home/galhar/gits/VideoMDM/dataset/nba/motionbert_predictions"
 DIVERSITY_TIMES = 200
 PRECISION_AND_RECALL_K = 3
 
@@ -143,6 +159,9 @@ class Evaluator:
 
         elif "ElePose" == subject:
             return self.get_3d_samples(ELEPOSE_SAMPLES_PATH, scale=1, flip=False, fps_ratio=-2)  # get ElePose samples
+
+        elif "saved_samples" == subject:
+            return self.get_3d_samples(self.args.saved_samples_path, scale=1.7, flip=True, fps_ratio=2)  # get saved samples
 
         elif "train_data" == subject:
             return self.get_data_samples("train")
