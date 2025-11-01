@@ -74,6 +74,7 @@ def plot_3d_motion(save_path, joints, dataset, title="", figsize=(5, 5), fps=20,
 
 
 def plot_motion(save_path, joints, dataset, title="", mask=None, figsize=(5, 5), fps=20, **kwargs):
+    matplotlib.use("Agg")
     skeleton = get_skeleton(dataset)
     data = joints.copy()
 
@@ -105,6 +106,12 @@ def plot_motion(save_path, joints, dataset, title="", mask=None, figsize=(5, 5),
             frame_line_color = colors[i] if line_mask != 0 else "black"
             ax.plot(lines[frame_i, i, :, 0], lines[frame_i, i, :, 1], lw=1, c=frame_line_color)
 
+    # Sanity prints
+    print(f"Data shape: {data.shape}, type: {type(data)}")
+    print(f"Lines shape: {lines.shape}, type: {type(lines)}")
+    print(f"Joint pairs: {joint_pairs}")
+    print(f"Colors: {colors}")
+
     anim = FuncAnimation(fig, animate, interval=1000, frames=len(data))
     save_animation(anim, save_path, fps)
 
@@ -112,8 +119,8 @@ def plot_motion(save_path, joints, dataset, title="", mask=None, figsize=(5, 5),
 
 
 def save_animation(anim: FuncAnimation, save_path, fps):
-    save_path = f"{save_path}.mp4"
+    save_path = f"{save_path}.gif"
     print(f"saving to [{os.path.abspath(save_path)}]...", end="", flush=True)
-    anim.save(save_path, fps=fps)
+    anim.save(save_path, fps=fps, writer='pillow')
     print("\033[0K\r\033[0K\r", end="")
     print(f"saved to [{os.path.abspath(save_path)}]")

@@ -66,12 +66,12 @@ class Sampler:
             shutil.rmtree(self.args.output_dir)
         os.makedirs(self.args.output_dir, exist_ok=True)
 
-    def visualize(self, sample, title="", normalized=False, model_kwargs=None, use_mask=False):
+    def visualize(self, sample, title="", normalized=False, model_kwargs=None, use_mask=False, num_samples=9999999):
         if normalized:
             sample = self.inverse_transform(sample)
         model_kwargs = self.model_kwargs if model_kwargs is None else model_kwargs
         sample = sample.cpu().numpy()
-        for sample_i in range(sample.shape[0]):
+        for sample_i in range(min(sample.shape[0], num_samples)):
             length = model_kwargs["y"]["lengths"][sample_i].item()
             mask = model_kwargs["y"]["mask"][sample_i].cpu().numpy().transpose(2, 0, 1)[:length] if use_mask else None
             motion = sample[sample_i].transpose(2, 0, 1)[:length]

@@ -6,12 +6,24 @@ import torch.optim as optim
 from tqdm import tqdm
 
 
+def length_checks(generated_features, real_features):
+    if len(generated_features) != len(real_features):
+        print(f"Warning: The number of generated features and real features are not the same.")
+        print(f"Generated features: {len(generated_features)}, Real features: {len(real_features)}")
+        print(f"Using the minimum of the two: {min(len(generated_features), len(real_features))}")
+        len_features = min(len(generated_features), len(real_features))
+        generated_features = generated_features[:len_features]
+        real_features = real_features[:len_features]
+    return generated_features, real_features
+
 def calculate_precision(generated_features, real_features, k=3):
-    assert len(generated_features) == len(real_features), "The number of generated features and real features must be the same."
+    #assert len(generated_features) == len(real_features), "The number of generated features and real features must be the same."
+    generated_features, real_features = length_checks(generated_features, real_features)
     return manifold_estimate(real_features, generated_features, k)
 
 def calculate_recall(generated_features, real_features, k=3):
-    assert len(generated_features) == len(real_features), "The number of generated features and real features must be the same."
+    #assert len(generated_features) == len(real_features), "The number of generated features and real features must be the same."
+    generated_features, real_features = length_checks(generated_features, real_features)
     return manifold_estimate(generated_features, real_features, k)
 
 

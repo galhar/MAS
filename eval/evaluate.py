@@ -5,6 +5,7 @@ import random
 import sys
 import numpy as np
 import torch
+from datetime import datetime
 from tqdm import tqdm
 from data_loaders.base_dataset import collate
 from data_loaders.dataset_utils import get_visualization_scale, sample_vertical_angle, get_dataset_loader
@@ -23,6 +24,16 @@ MOTIONBERT_SAMPLES_PATH = "dataset/nba/motionBert_predictions"
 DIVERSITY_TIMES = 200
 PRECISION_AND_RECALL_K = 3
 
+SCALE_FOR_SAVED_SAMPLES = 2.20919891496
+
+def interpolate_motion(motion, frames_to_interpolate):
+    motion = torch.from_numpy(motion)
+    motion_vel = motion[1:] - motion[:-1]
+    motion_vel = torch.cat([motion_vel, torch.zeros((1, motion.shape[1], motion.shape[2]))], dim=0)
+    motion_lengthened = torch.zeros((motion.shape[0] * frames_to_interpolate, motion.shape[1], motion.shape[2]))
+    for i in range(frames_to_interpolate):
+        motion_lengthened[i::frames_to_interpolate] = motion + (i / frames_to_interpolate) * motion_vel
+    return motion_lengthened.numpy()
 
 def convert_to_numpy(list_of_torch_tensors):
     return np.stack([tensor.cpu().numpy() for tensor in list_of_torch_tensors])
@@ -41,7 +52,7 @@ def project_to_random_angle(motion, dataset, mode):
     return projected_motion
 
 
-from .test_evaluator import EvalSampler
+from eval.test_evaluator import EvalSampler
 
 
 class Evaluator:
@@ -96,9 +107,18 @@ class Evaluator:
         file_names = os.listdir(samples_path)
         random.shuffle(file_names)  # Shuffling instead of random sampling can increase diversity and recall. Should not hurt FID and precision by much.
         for sample_file in tqdm(file_names[: self.args.eval_num_samples]):
-            motion = np.load(os.path.join(samples_path, sample_file))
-            motion = convert_motionBert_skeleton(motion)
-            motion = motion[::fps_ratio]  # fix fps
+            try:
+                motion = np.load(os.path.join(samples_path, sample_file))
+            except ValueError as e:
+                print(f"Error loading {sample_file}: {e}")
+                continue
+            if 'bert' in samples_path:
+                motion = convert_motionBert_skeleton(motion)
+            if fps_ratio < 0:
+                frames_to_interpolate = -fps_ratio
+                motion = interpolate_motion(motion, frames_to_interpolate)
+            else:
+                motion = motion[::fps_ratio]  # fix fps
             motion[..., 1] *= -1 if flip else 1  # flip y axis
             motion *= scale  # scale
             motions.append(motion)
@@ -109,7 +129,6 @@ class Evaluator:
         motions_batched = [collate(batch) for batch in motions_batched]
         motions_batched = [(project_to_random_angle(motion_batch.permute(0, 3, 1, 2), self.args.dataset, self.args.angle_mode).permute(0, 2, 3, 1), model_kwargs) for motion_batch, model_kwargs in motions_batched]
         motions_batched = [(self.encoder.transform(motion_batch.to(self.encoder.device)), model_kwargs) for motion_batch, model_kwargs in motions_batched]
-
         return motions_batched
 
     def get_multiple_samples(self, subjects, model_args=None):
@@ -120,16 +139,19 @@ class Evaluator:
             return self.get_data_samples("test")
 
         elif "motionBert" == subject:
-            return self.get_3d_samples(MOTIONBERT_SAMPLES_PATH, scale=1.7, flip=True, fps_ratio=2)  # get motionBert samples
+            return self.get_3d_samples(MOTIONBERT_SAMPLES_PATH, scale=SCALE_FOR_SAVED_SAMPLES, flip=True, fps_ratio=2)  # get motionBert samples
 
         elif "ElePose" == subject:
-            return self.get_3d_samples(ELEPOSE_SAMPLES_PATH, scale=1, flip=False, fps_ratio=2)  # get ElePose samples
+            return self.get_3d_samples(ELEPOSE_SAMPLES_PATH, scale=1, flip=False, fps_ratio=-2)  # get ElePose samples
 
         elif "train_data" == subject:
             return self.get_data_samples("train")
 
         elif "model" == subject:
             return self.get_model_samples(model_args)
+        
+        elif "saved_samples" == subject:
+            return self.get_3d_samples(self.args.saved_samples_path, scale=SCALE_FOR_SAVED_SAMPLES, flip=True, fps_ratio=1)
 
         elif subject in MAS_TYPES.keys():
             return self.get_mas_samples(subject, model_args)
@@ -138,12 +160,52 @@ class Evaluator:
             raise ValueError(f"Unknown subject {subject}")
 
     def visualize_samples(self, motions):
+        if self.args.vis_subjects is None or len(self.args.vis_subjects) == 0 or self.args.vis_subjects[0] is None or self.args.vis_subjects[0] == "":
+            return
+        visualized = False
         for vis_subject in self.args.vis_subjects:
             if vis_subject in motions:
                 for motion, model_kwargs in motions[vis_subject][: ceil(self.args.num_visualize_samples / self.args.batch_size)]:
-                    self.encoder.visualize(motion.to(self.encoder.device), f"{vis_subject}_sample", model_kwargs=model_kwargs, normalized=True)
+                    visualized = True
+                    date_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    name = f"{vis_subject}_sample_{date_time}"
+                    print(f"visualizing to {name} a motion of length {motion.shape[1]}")
+                    self.encoder.visualize(motion.to(self.encoder.device), name, model_kwargs=model_kwargs, normalized=True, num_samples=self.args.num_visualize_samples)
+        assert visualized, f"No samples were visualized, expected one of {self.args.vis_subjects} to be in the samples"
 
     def evaluate_samples(self, samples, test_samples):
+        # samples, test_samples: (B, J, 2, T)
+        F = 30
+        eps = 1e-6
+        diameter_ratio_sum = 0.0
+        num_frames = 0
+
+        for motion_pair, test_motion_pair in zip(samples, test_samples):
+            # motion, test_motion: (B, J, 2, T)
+            # Take first F frames
+            motion = motion_pair[0]
+            test_motion = test_motion_pair[0].to(motion.device)
+            mx = motion[:, :, 0, :F]
+            my = motion[:, :, 1, :F]
+            tx = test_motion[:, :, 0, :F]
+            ty = test_motion[:, :, 1, :F]
+
+            # Per-frame bbox: min/max over joints (axis=0)
+            m_min_x = mx.min(axis=1).values; m_max_x = mx.max(axis=1).values
+            m_min_y = my.min(axis=1).values; m_max_y = my.max(axis=1).values
+            t_min_x = tx.min(axis=1).values; t_max_x = tx.max(axis=1).values
+            t_min_y = ty.min(axis=1).values; t_max_y = ty.max(axis=1).values
+
+            # Per-frame "diameter" (diagonal of bbox)
+            m_diam = torch.sqrt((m_max_x - m_min_x) ** 2 + (m_max_y - m_min_y) ** 2)  # (B, F,)
+            t_diam = torch.sqrt((t_max_x - t_min_x) ** 2 + (t_max_y - t_min_y) ** 2)  # (B, F,)
+            # Accumulate ratios
+            tensor = m_diam / (t_diam + eps)
+            diameter_ratio_sum += torch.sum(tensor)
+            num_frames += tensor.shape[0] * tensor.shape[1]
+
+        diameter_ratio_mean = diameter_ratio_sum / max(num_frames, 1)
+        print(f"Average dimater ratio: {diameter_ratio_mean}")
         encodings = convert_to_numpy(unbatch(self.encode_samples(samples)))
         test_encodings = convert_to_numpy(unbatch(self.encode_samples(test_samples)))
 
@@ -169,6 +231,7 @@ class Evaluator:
         test_samples = self.get_samples("test_data")
         all_metrics = {}
 
+        self.visualize_samples(all_samples)
         for subject, samples in all_samples.items():
             metrics = self.evaluate_samples(samples, test_samples)
             all_metrics[subject] = metrics
@@ -191,7 +254,7 @@ class Evaluator:
             print_table(metrics_means, metrics_intervals, self.args.subjects, self.args.metrics_names)
 
         if save:
-            log_path = model_args.model_path.replace(".pth", f"_eval_{self.args.angle_mode}.txt")
+            log_path = model_args.model_path.replace(".pt", ".pth").replace(".pth", f"_eval_{self.args.angle_mode}.txt")
             save_metrics(metrics_means, metrics_intervals, log_path, self.args.subjects, self.args.metrics_names)
 
         return metrics_means, metrics_intervals

@@ -145,6 +145,7 @@ def add_evaluation_options(parser: ArgumentParser):
     group.add_argument("--num_eval_iterations", default=10, type=int, help="Number of iterations to run evaluation loop.")
     group.add_argument("--angle_mode", default="uniform", type=str, choices=["uniform", "side", "hybrid"], help="Horizontal angle sampling mode for projecting the 3D motions.")
     group.add_argument("--eval_num_samples", default=1024, type=int, help="Number of samples to load for each subject during evaluation loop. If you wish to compare to the results presented in the paper, do not change the default value.")
+    group.add_argument("--saved_samples_path", default=None, type=str, help="Path to saved samples directory.")
 
 
 def add_evaluator_sampling_options(parser: ArgumentParser):
